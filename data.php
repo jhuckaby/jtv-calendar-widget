@@ -5,7 +5,6 @@
 // Copyright (c) 2011 Joseph Huckaby
 // Released under the MIT License
 
-require_once "xml.php";
 $cal_id = $_GET['cal'];
 
 $cache_dir = 'cache';
@@ -21,12 +20,12 @@ $wday_map = array(
 	'SA' => 6
 );
 
-$cache_file = $cache_dir . '/cache-' . $cal_id . '.xml';
+$cache_file = $cache_dir . '/cache-' . $cal_id . '.json';
 if (file_exists($cache_file)) {
 	$mod = filemtime($cache_file);
 	if (time() - $mod < $cache_ttl) {
 		// cache is fresh, return immediately
-		send_response(parse_xml($cache_file));
+		send_response(json_decode(file_get_contents($cache_file), true));
 	}
 }
 
@@ -131,17 +130,18 @@ $next_event = null;
 $jtv_data = null;
 if (isset($_GET['channel'])) {
 	$channel_id = $_GET['channel'];
-	$jtv_data = parse_xml( file_get_contents('http://api.justin.tv/api/stream/list.xml?channel='.$channel_id) );
-	if (isa_hash($jtv_data)) {
+	$jtv_data = json_decode( file_get_contents('http://api.justin.tv/api/stream/list.json?channel='.$channel_id), true );
+	if (isset($jtv_data[0])) $jtv_data = $jtv_data[0];
+	if (isset($jtv_data['stream'])) $jtv_data = $jtv_data['stream'];
+	if (is_array($jtv_data)) {
 		$data['JTVLive'] = 1;
-		$data['JTVStatus'] = XML_lookup('/stream/channel/status', $jtv_data);
-		if (!$data['JTVStatus']) $data['JTVStatus'] = '';
+		$data['JTVStatus'] = (isset($jtv_data['channel']) && isset($jtv_data['channel']['status'])) ? $jtv_data['channel']['status'] : '';
 	}
 }
 
 // if JTV channel provided, only show "live" event if stream is live
 if ($cur_event && isset($_GET['channel'])) {
-	if (!isa_hash($jtv_data)) {
+	if (!$jtv_data) {
 		// channel is not live, remove current event
 		// if show is less than half over, adjust time so that NextEvent will be the current one
 		if ($now - $event['CurrentStart'] < ($event['Duration'] / 2)) {
@@ -181,7 +181,7 @@ foreach ($events as &$event) {
 // @file_put_contents( $cache_dir . '/temp-' . $cal_id . '.debug', print_r($events, true) );
 
 // save data to cache for subsequent requests
-$result = @file_put_contents( $cache_file, compose_xml($data, 'Response') );
+$result = @file_put_contents( $cache_file, json_encode($data) );
 if (!$result) send_response(array( 'Code' => 1, 'Description' => 'Failed to save cache file to server.  Check permissions of cache dir?' ));
 
 // send data to client
@@ -320,17 +320,9 @@ function check_event( $event, $now, $dargs_now ) {
 }
 
 function send_response($data) {
-	// send JSON or XML response to client, and exit
-	if (isset($_GET['format']) && preg_match('/js/i', $_GET['format']) && isset($_GET['callback'])) {
-		// js response
-		header('Content-Type: text/javascript');
-		print $_GET['callback'] . '(' . trim(preg_replace('/\;$/', '', XMLtoJavaScript($data))) . ');';
-	}
-	else {
-		// xml response
-		header('Content-Type: text/xml');
-		print compose_xml( $data, 'Response' );
-	}
+	// js response
+	header('Content-Type: text/javascript');
+	print $_GET['callback'] . '(' . json_encode($data) . ');';
 	exit();
 }
 
